@@ -12,11 +12,13 @@ export function makeFakeRest() {
   const channelMessages = []; // {channelId, body}
   const editedMessages = [];
   const createdThreads = [];
+  const deletedChannels = [];
   const editedInteractionResponses = [];
   return {
     channelMessages,
     editedMessages,
     createdThreads,
+    deletedChannels,
     editedInteractionResponses,
     async createMessage(channelId, body) {
       const id = nextSnowflake();
@@ -34,6 +36,10 @@ export function makeFakeRest() {
       const id = nextSnowflake();
       createdThreads.push({ id, channelId, messageId, body });
       return { id, parent_id: channelId };
+    },
+    async deleteChannel(channelId) {
+      deletedChannels.push(channelId);
+      return null;
     },
     async putGuildApplicationCommands() {
       return [];
@@ -85,6 +91,7 @@ export class FakeAcpClient extends EventEmitter {
 
   async sessionNew(cwd) {
     if (this.behavior.sessionNewError) throw this.behavior.sessionNewError;
+    if (this.behavior.sessionNewImpl) return this.behavior.sessionNewImpl(cwd, this);
     return this.behavior.sessionId || 'fake-session-id';
   }
 

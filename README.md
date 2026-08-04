@@ -162,6 +162,9 @@ Guild-scoped slash commands, registered on Gateway `READY`:
   (reports "not a known thread").
 - `/cancel` — sends `session/cancel` to the thread's active Copilot session
   and resolves any pending permission requests in that thread as cancelled.
+- `/delete` — closes the Copilot process, permanently removes the stored
+  session mapping, and deletes the Discord thread. It is rejected in the
+  top-level channel.
 - `/reset` — closes (or kills) the thread's Copilot child process and
   clears its stored session id. The thread stays "known" (no mention
   needed for the next message), but that next message starts a **brand

@@ -50,6 +50,10 @@ export class Broker {
 
     /** @type {Map<string, ThreadSession>} threadId -> live session */
     this._sessions = new Map();
+    /** @type {Set<string>} thread ids with a Discord deletion in progress */
+    this._deletingThreads = new Set();
+    /** @type {Set<string>} deleted thread ids that stale async work must ignore */
+    this._deletedThreads = new Set();
     this._applicationId = null;
     this._shuttingDown = false;
 
@@ -229,6 +233,11 @@ export class Broker {
     try {
       await acp.initialize();
       const sessionId = await acp.sessionNew(cwd);
+      if (this._deletedThreads.has(threadId) || this._sessions.get(threadId) !== session) {
+        session.expectedClose = true;
+        acp.close();
+        return;
+      }
       session.copilotSessionId = sessionId;
       this.state.setThread(threadId, {
         copilotSessionId: sessionId,
@@ -266,6 +275,11 @@ export class Broker {
     try {
       await acp.initialize();
       const { method } = await acp.sessionResume(persisted.copilotSessionId, persisted.cwd);
+      if (this._deletedThreads.has(threadId) || this._sessions.get(threadId) !== session) {
+        session.expectedClose = true;
+        acp.close();
+        return;
+      }
       session.copilotSessionId = persisted.copilotSessionId;
       this.logger.info('resumed session', { threadId, method });
     } catch (err) {
@@ -456,11 +470,14 @@ export class Broker {
     } finally {
       session.busy = false;
       session.streaming = null;
-      this.state.setThread(session.threadId, {
-        ...this.state.getThread(session.threadId),
-        updatedAt: new Date().toISOString(),
-      });
-      await this._saveState();
+      const persisted = this.state.getThread(session.threadId);
+      if (persisted) {
+        this.state.setThread(session.threadId, {
+          ...persisted,
+          updatedAt: new Date().toISOString(),
+        });
+        await this._saveState();
+      }
     }
   }
 
@@ -496,6 +513,36 @@ export class Broker {
       if (session?.copilotSessionId) session.acp.sessionCancel(session.copilotSessionId);
       this.permissions.cancelForThread(threadId);
       await this._respondInteraction(interaction, ephemeralResponse('Cancelled current prompt and pending approvals (if any).'));
+      return;
+    }
+    if (name === 'delete') {
+      if (this._deletingThreads.has(threadId)) {
+        await this._respondInteraction(
+          interaction,
+          ephemeralResponse('This Copilot session is already being deleted.'),
+        );
+        return;
+      }
+      if (!this.state.getThread(threadId)) {
+        await this._respondInteraction(
+          interaction,
+          ephemeralResponse('`/delete` can only be used inside a known Copilot session thread.'),
+        );
+        return;
+      }
+      await this._respondInteraction(interaction, deferredEphemeralResponse());
+      try {
+        await this._deleteThread(threadId);
+      } catch (err) {
+        this.logger.error('failed to delete Copilot session thread', {
+          threadId,
+          error: err.message,
+        });
+        await this._editOriginalResponse(
+          interaction,
+          `Could not delete this session: ${sanitizeErr(err)}. The thread and its stored session remain available.`,
+        );
+      }
       return;
     }
     if (name === 'reset') {
@@ -576,6 +623,43 @@ export class Broker {
     if (persisted) {
       this.state.setThread(threadId, { ...persisted, copilotSessionId: null, updatedAt: new Date().toISOString() });
       await this._saveState();
+    }
+  }
+
+  /** @private @param {string} threadId */
+  async _deleteThread(threadId) {
+    if (!this.state.getThread(threadId) || this._deletingThreads.has(threadId)) return;
+    this._deletingThreads.add(threadId);
+    try {
+      // Delete Discord first. If this fails, the live ACP process and stored
+      // context remain untouched and the user can retry safely.
+      await this.rest.deleteChannel(threadId);
+
+      this._deletedThreads.add(threadId);
+      this.state.deleteThread(threadId);
+      try {
+        await this.state.save();
+      } catch (err) {
+        this.logger.error('Discord thread deleted but session-state cleanup failed', {
+          threadId,
+          error: err.message,
+        });
+      }
+
+      this.permissions.cancelForThread(threadId);
+      const session = this._sessions.get(threadId);
+      if (session) {
+        if (session.copilotSessionId) {
+          try {
+            await session.acp.sessionClose(session.copilotSessionId);
+          } catch {
+            // The process is still terminated below.
+          }
+        }
+        this._teardownSession(threadId);
+      }
+    } finally {
+      this._deletingThreads.delete(threadId);
     }
   }
 

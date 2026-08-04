@@ -5,6 +5,7 @@
 /** Discord application command definitions, registered via PUT on READY. */
 export const COMMAND_DEFINITIONS = [
   { name: 'cancel', description: 'Cancel the current prompt and any pending approvals in this thread', type: 1 },
+  { name: 'delete', description: 'Permanently delete this Copilot session and its Discord thread', type: 1 },
   { name: 'reset', description: 'Reset this thread: closes the Copilot session so the next message starts fresh', type: 1 },
   { name: 'status', description: 'Show broker/session status for this thread', type: 1 },
 ];

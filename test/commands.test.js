@@ -4,6 +4,7 @@ import { rm, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Broker } from '../src/broker.js';
+import { COMMAND_DEFINITIONS } from '../src/discord/commands.js';
 import { StateStore } from '../src/state/store.js';
 import { createLogger } from '../src/logger.js';
 import { makeFakeRest, makeFakeGateway, makeAcpClientFactory } from './helpers/fakes.js';
@@ -72,6 +73,10 @@ function makeInteraction({ name, threadId = CHANNEL_ID, userId = USER_ID, guildI
 }
 
 describe('Slash command authorization and behavior', () => {
+  test('registers the /delete command', () => {
+    assert.ok(COMMAND_DEFINITIONS.some((command) => command.name === 'delete'));
+  });
+
   test('/status in an unknown thread reports not-known without error', async () => {
     const { broker, rest } = await makeBroker();
     await broker._onDispatch('INTERACTION_CREATE', makeInteraction({ name: 'status', threadId: 'unknown-thread' }));
@@ -165,6 +170,149 @@ describe('Slash command authorization and behavior', () => {
     assert.match(response.data.content, /Cancelled/);
     resolvePrompt({ stopReason: 'cancelled' });
     await messagePromise;
+  });
+
+  test('/delete closes the session, removes its state, deletes the thread, and cannot be undone by an in-flight prompt', async () => {
+    let resolvePrompt;
+    const { broker, rest, stateStore, acpFactory } = await makeBroker({
+      behaviors: [{ promptImpl: () => new Promise((resolve) => (resolvePrompt = resolve)) }],
+    });
+    broker._cachedBotUserId = 'bot-id';
+
+    const messagePromise = broker._onDispatch('MESSAGE_CREATE', {
+      id: 'm1',
+      content: '<@bot-id> do something slow',
+      author: { id: USER_ID, bot: false },
+      guild_id: GUILD_ID,
+      channel_id: CHANNEL_ID,
+      mentions: [{ id: 'bot-id' }],
+      mention_roles: [],
+      attachments: [],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const threadId = rest.createdThreads[0].id;
+
+    await broker._onDispatch('INTERACTION_CREATE', makeInteraction({ name: 'delete', threadId }));
+
+    const client = acpFactory.created[0];
+    assert.equal(client.sessionClosed, true);
+    assert.equal(client.closed, true);
+    assert.equal(stateStore.getThread(threadId), undefined);
+    assert.deepEqual(rest.deletedChannels, [threadId]);
+    assert.equal(rest.lastInteractionResponse.body.type, 5);
+
+    resolvePrompt({ stopReason: 'cancelled' });
+    await messagePromise;
+    assert.equal(stateStore.getThread(threadId), undefined);
+  });
+
+  test('/delete is rejected outside a known session thread', async () => {
+    const { broker, rest } = await makeBroker();
+
+    await broker._onDispatch(
+      'INTERACTION_CREATE',
+      makeInteraction({ name: 'delete', threadId: CHANNEL_ID }),
+    );
+
+    assert.match(rest.lastInteractionResponse.body.data.content, /known Copilot session thread/);
+    assert.deepEqual(rest.deletedChannels, []);
+  });
+
+  test('/delete leaves the live session and stored context untouched when Discord refuses to delete the thread', async () => {
+    const { broker, rest, stateStore, acpFactory } = await makeBroker();
+    broker._cachedBotUserId = 'bot-id';
+    broker._applicationId = 'app-id';
+    await broker._onDispatch('MESSAGE_CREATE', {
+      id: 'm1',
+      content: '<@bot-id> hello',
+      author: { id: USER_ID, bot: false },
+      guild_id: GUILD_ID,
+      channel_id: CHANNEL_ID,
+      mentions: [{ id: 'bot-id' }],
+      mention_roles: [],
+      attachments: [],
+    });
+    const threadId = rest.createdThreads[0].id;
+    rest.deleteChannel = async () => {
+      throw new Error('missing Manage Threads permission');
+    };
+
+    await broker._onDispatch('INTERACTION_CREATE', makeInteraction({ name: 'delete', threadId }));
+
+    assert.equal(stateStore.getThread(threadId).copilotSessionId, 'fake-session-id');
+    assert.equal(acpFactory.created[0].sessionClosed, false);
+    assert.equal(acpFactory.created[0].closed, false);
+    assert.match(rest.lastEditedInteractionResponse.body.content, /Could not delete/);
+  });
+
+  test('/delete serializes concurrent requests for the same thread', async () => {
+    let releaseDelete;
+    const deleteGate = new Promise((resolve) => (releaseDelete = resolve));
+    const { broker, rest } = await makeBroker();
+    broker._cachedBotUserId = 'bot-id';
+    await broker._onDispatch('MESSAGE_CREATE', {
+      id: 'm1',
+      content: '<@bot-id> hello',
+      author: { id: USER_ID, bot: false },
+      guild_id: GUILD_ID,
+      channel_id: CHANNEL_ID,
+      mentions: [{ id: 'bot-id' }],
+      mention_roles: [],
+      attachments: [],
+    });
+    const threadId = rest.createdThreads[0].id;
+    let deleteCalls = 0;
+    rest.deleteChannel = async () => {
+      deleteCalls += 1;
+      await deleteGate;
+    };
+
+    const first = broker._onDispatch(
+      'INTERACTION_CREATE',
+      makeInteraction({ name: 'delete', threadId }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await broker._onDispatch(
+      'INTERACTION_CREATE',
+      makeInteraction({ name: 'delete', threadId }),
+    );
+
+    assert.equal(deleteCalls, 1);
+    assert.match(rest.lastInteractionResponse.body.data.content, /already being deleted/);
+    releaseDelete();
+    await first;
+  });
+
+  test('/delete prevents delayed session creation from recreating deleted state', async () => {
+    let releaseSessionNew;
+    const sessionNewGate = new Promise((resolve) => (releaseSessionNew = resolve));
+    const { broker, rest, stateStore } = await makeBroker({
+      behaviors: [{ sessionNewImpl: () => sessionNewGate }],
+    });
+    broker._cachedBotUserId = 'bot-id';
+
+    const messagePromise = broker._onDispatch('MESSAGE_CREATE', {
+      id: 'm1',
+      content: '<@bot-id> hello',
+      author: { id: USER_ID, bot: false },
+      guild_id: GUILD_ID,
+      channel_id: CHANNEL_ID,
+      mentions: [{ id: 'bot-id' }],
+      mention_roles: [],
+      attachments: [],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const threadId = rest.createdThreads[0].id;
+
+    await broker._onDispatch(
+      'INTERACTION_CREATE',
+      makeInteraction({ name: 'delete', threadId }),
+    );
+    releaseSessionNew('late-session-id');
+    await messagePromise;
+
+    assert.equal(stateStore.getThread(threadId), undefined);
+    assert.deepEqual(rest.deletedChannels, [threadId]);
   });
 
   test('/reset ACKs immediately (deferred) then closes the session and clears the mapping via an edited response', async () => {

@@ -198,6 +198,11 @@ export class DiscordRestClient {
     return this.createMessage(threadId, body);
   }
 
+  /** @param {string} channelId */
+  deleteChannel(channelId) {
+    return this.request('DELETE', `/channels/${channelId}`);
+  }
+
   /**
    * PUTs the full guild application command set (replaces existing set).
    * @param {string} applicationId @param {string} guildId @param {object[]} commands
