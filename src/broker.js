@@ -218,7 +218,12 @@ export class Broker {
    * @param {string} threadId @param {string} cwd @param {string} promptText @param {object[]} attachments
    */
   async _startNewSession(threadId, cwd, promptText, attachments) {
-    const acp = this._acpClientFactory({ copilotBin: this.config.copilotBin, cwd, logger: this.logger });
+    const acp = this._acpClientFactory({
+      copilotBin: this.config.copilotBin,
+      cwd,
+      allowAll: this.config.copilotAllowAll,
+      logger: this.logger,
+    });
     const session = this._registerSession(threadId, acp, cwd);
 
     try {
@@ -253,6 +258,7 @@ export class Broker {
     const acp = this._acpClientFactory({
       copilotBin: this.config.copilotBin,
       cwd: persisted.cwd,
+      allowAll: this.config.copilotAllowAll,
       logger: this.logger,
     });
     const session = this._registerSession(threadId, acp, persisted.cwd);

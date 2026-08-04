@@ -92,12 +92,13 @@ function redact(text) {
  */
 export class AcpClient extends EventEmitter {
   /**
-   * @param {{copilotBin:string, cwd:string, logger:import('../logger.js').Logger, spawnImpl?: typeof spawn}} opts
+   * @param {{copilotBin:string, cwd:string, allowAll?:boolean, logger:import('../logger.js').Logger, spawnImpl?: typeof spawn}} opts
    */
   constructor(opts) {
     super();
     this._copilotBin = opts.copilotBin;
     this._cwd = opts.cwd;
+    this._allowAll = opts.allowAll === true;
     this.logger = opts.logger.child({ component: 'acp-client' });
     this._spawnImpl = opts.spawnImpl || spawn;
     this._child = null;
@@ -114,7 +115,10 @@ export class AcpClient extends EventEmitter {
 
   /** Spawns the child process and wires up stdio handling. */
   start() {
-    const child = this._spawnImpl(this._copilotBin, ['--acp', '--stdio'], {
+    const args = this._allowAll
+      ? ['--allow-all', '--acp', '--stdio']
+      : ['--acp', '--stdio'];
+    const child = this._spawnImpl(this._copilotBin, args, {
       cwd: this._cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: process.env,

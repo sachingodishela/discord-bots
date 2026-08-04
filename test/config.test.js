@@ -37,6 +37,7 @@ describe('config validation', () => {
     assert.equal(cfg.attachmentMaxCount, 5);
     assert.equal(cfg.logLevel, 'info');
     assert.equal(cfg.defaultCwd, '/home/sachin');
+    assert.equal(cfg.copilotAllowAll, false);
     assert.ok(cfg.stateDir.startsWith('/'));
   });
 
@@ -66,6 +67,24 @@ describe('config validation', () => {
     assert.throws(() => loadConfig(baseEnv({ BROKER_MAX_SESSIONS: '0' })), ConfigError);
   });
 
+  test('accepts true or false for BROKER_COPILOT_ALLOW_ALL', () => {
+    assert.equal(
+      loadConfig(baseEnv({ BROKER_COPILOT_ALLOW_ALL: 'true' })).copilotAllowAll,
+      true,
+    );
+    assert.equal(
+      loadConfig(baseEnv({ BROKER_COPILOT_ALLOW_ALL: 'false' })).copilotAllowAll,
+      false,
+    );
+  });
+
+  test('rejects invalid BROKER_COPILOT_ALLOW_ALL', () => {
+    assert.throws(
+      () => loadConfig(baseEnv({ BROKER_COPILOT_ALLOW_ALL: 'yes' })),
+      ConfigError,
+    );
+  });
+
   test('rejects invalid BROKER_LOG_LEVEL', () => {
     assert.throws(() => loadConfig(baseEnv({ BROKER_LOG_LEVEL: 'verbose' })), ConfigError);
   });
@@ -76,6 +95,7 @@ describe('config validation', () => {
         BROKER_STATE_DIR: '/tmp-not-used/state',
         BROKER_DEFAULT_CWD: '/home/sachin/work',
         COPILOT_BIN: '/usr/local/bin/copilot',
+        BROKER_COPILOT_ALLOW_ALL: 'true',
         BROKER_MAX_SESSIONS: '5',
         BROKER_ATTACHMENT_MAX_BYTES: '2048',
         BROKER_ATTACHMENT_MAX_COUNT: '2',
@@ -83,6 +103,7 @@ describe('config validation', () => {
       }),
     );
     assert.equal(cfg.maxSessions, 5);
+    assert.equal(cfg.copilotAllowAll, true);
     assert.equal(cfg.attachmentMaxBytes, 2048);
     assert.equal(cfg.attachmentMaxCount, 2);
     assert.equal(cfg.logLevel, 'debug');

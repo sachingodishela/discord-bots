@@ -78,6 +78,7 @@ narrow concern.
 | `BROKER_STATE_DIR` | no | `/home/sachin/.local/state/discord-copilot-broker` | Must be absolute. Created with mode `0700`. |
 | `BROKER_DEFAULT_CWD` | no | `/home/sachin` | Must be absolute. Default cwd for new Copilot sessions. |
 | `COPILOT_BIN` | no | `/home/sachin/.nvm/versions/node/v24.18.1/bin/copilot` | Must be absolute. |
+| `BROKER_COPILOT_ALLOW_ALL` | no | `false` | When `true`, broker sessions start Copilot with `--allow-all`, disabling tool/path/URL prompts. |
 | `BROKER_MAX_SESSIONS` | no | `3` | Positive integer; caps concurrent Copilot processes. |
 | `BROKER_ATTACHMENT_MAX_BYTES` | no | `10485760` (10 MiB) | Total budget shared across all attachments in one message. |
 | `BROKER_ATTACHMENT_MAX_COUNT` | no | `5` | Max attachments per message. |
@@ -218,6 +219,11 @@ elsewhere on the host, that is an operator/host-level decision entirely
 outside this project's scope — the broker only ever surfaces exactly the
 permission request the ACP agent itself sends, it does not grant, imply,
 or manage any sudo configuration.
+
+The installed systemd service sets `BROKER_COPILOT_ALLOW_ALL=true`, so
+broker-launched Copilot processes bypass this approval workflow entirely.
+This setting does not affect terminal Copilot sessions and does not grant
+operating-system sudo access.
 
 ## Known limitations
 

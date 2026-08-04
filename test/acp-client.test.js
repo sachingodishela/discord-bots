@@ -91,6 +91,24 @@ function makeFakeClient(fakeChild) {
   }).start();
 }
 
+test('allowAll starts Copilot with --allow-all before ACP mode arguments', () => {
+  const fakeChild = makeFakeChild();
+  let capturedArgs;
+  const client = new AcpClient({
+    copilotBin: 'unused',
+    cwd: '/home/sachin',
+    allowAll: true,
+    logger: silentLogger,
+    spawnImpl: (_bin, args) => {
+      capturedArgs = args;
+      return fakeChild;
+    },
+  }).start();
+
+  assert.deepEqual(capturedArgs, ['--allow-all', '--acp', '--stdio']);
+  client.close();
+});
+
 describe('AcpClient against mock ACP fixture', () => {
   test('initialize, session/new, and session/prompt round-trip with streamed update', async () => {
     const client = makeClient();

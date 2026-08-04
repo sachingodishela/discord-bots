@@ -98,6 +98,21 @@ function positiveInt(name, value, fallback, issues) {
 }
 
 /**
+ * @param {string} name
+ * @param {string|undefined} value
+ * @param {boolean} fallback
+ * @param {string[]} issues
+ * @returns {boolean}
+ */
+function booleanValue(name, value, fallback, issues) {
+  if (value === undefined || value === '') return fallback;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  issues.push(`${name} must be true or false`);
+  return fallback;
+}
+
+/**
  * Loads and validates configuration from an environment-like object.
  * @param {NodeJS.ProcessEnv} [env]
  * @returns {Readonly<object>}
@@ -134,6 +149,12 @@ export function loadConfig(env = process.env) {
   );
 
   const maxSessions = positiveInt('BROKER_MAX_SESSIONS', env.BROKER_MAX_SESSIONS, 3, issues);
+  const copilotAllowAll = booleanValue(
+    'BROKER_COPILOT_ALLOW_ALL',
+    env.BROKER_COPILOT_ALLOW_ALL,
+    false,
+    issues,
+  );
   const attachmentMaxBytes = positiveInt(
     'BROKER_ATTACHMENT_MAX_BYTES',
     env.BROKER_ATTACHMENT_MAX_BYTES,
@@ -165,6 +186,7 @@ export function loadConfig(env = process.env) {
     stateDir,
     defaultCwd,
     copilotBin,
+    copilotAllowAll,
     maxSessions,
     attachmentMaxBytes,
     attachmentMaxCount,
