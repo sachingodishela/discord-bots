@@ -1,0 +1,21 @@
+{
+  "name": "discord-copilot-broker",
+  "version": "1.0.0",
+  "description": "Dependency-free Node.js broker bridging a Discord bot to the Copilot ACP (Agent Client Protocol) CLI, one Discord thread per Copilot session.",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/*.test.js",
+    "check:syntax": "node scripts/check-syntax.mjs",
+    "smoke:acp": "node scripts/smoke-acp.mjs",
+    "pretest": "npm run check:syntax"
+  },
+  "dependencies": {},
+  "devDependencies": {},
+  "license": "UNLICENSED"
+}
