@@ -1,4 +1,4 @@
-# discord-copilot-broker
+# Agent Broker Bot
 
 A dependency-free Node.js broker that bridges a Discord bot to the
 [Copilot CLI](https://github.com/github/copilot-cli) over its Agent Client
@@ -8,6 +8,9 @@ Copilot ACP session/process.
 Zero third-party npm runtime or dev dependencies: only Node.js built-ins
 (`node:*`) plus the global `WebSocket` and `fetch` APIs available in modern
 Node. Plain ESM JavaScript, no TypeScript/transpilation.
+
+See the [repository README](../../README.md) for the multi-bot layout and shared
+Docker restart behavior.
 
 ## Architecture
 
@@ -37,29 +40,25 @@ narrow concern.
 
 ## Threat model / trust boundaries
 
-- **This broker runs as the Linux user `sachin`, with the same filesystem
-  and process privileges as any other program that user runs.** It does
-  **not** provide sandboxing, containerization, or privilege separation.
-  Every Copilot ACP session it spawns can read/write anything `sachin` can.
-  Multiple threads' sessions **share the same host filesystem** even though
-  each has an independent Copilot session id and child process — a change
-  made from one thread's session is visible to every other thread's session
-  and to the host.
+- **The broker and every Copilot ACP session it spawns run inside one Docker
+  container as the non-root `node` user.** Copilot can read/write anything in
+  the container, including the shared `/workspace` volume, but not the host
+  filesystem. Multiple threads' sessions **share the same container
+  filesystem** even though each has an independent Copilot session id and
+  child process — a change made from one thread's session is visible to every
+  other thread's session.
 - **The only enforced identity boundary is Discord-side authorization**:
   the configured Discord guild, channel, user, and role IDs. Anyone who
   controls that Discord account, or who compromises the bot token, has the
-  same level of access to this host as the broker process does.
-- **The broker does not configure or grant sudo/NOPASSWD access.** If the
-  operating system account this runs as has unrestricted sudo (which is a
-  separate, orthogonal, and dangerous configuration choice made outside
-  this project), the broker would simply relay whatever commands Copilot
-  runs under that account — it does not add or remove any such privilege,
-  and the project explicitly does not configure sudoers.
+  same level of access to the container (and the network and GitHub token
+  it holds) as the broker process does.
 - **Secrets are never logged or persisted.** The Discord bot token, Discord
   interaction tokens, GitHub/Copilot auth data, prompt/message content, and
   attachment bytes are excluded from the structured logger and from the
   on-disk state file by construction — see `src/logger.js` (key/value
   redaction) and `src/state/store.js` (explicit allow-listed fields only).
+  Note that child Copilot processes inherit the container environment,
+  including `COPILOT_GITHUB_TOKEN`.
 - **ACP permission requests are a UX surface, not a security control.** The
   bridge for `session/request_permission` (see below) makes the agent's own
   tool-call approval flow visible in Discord; it does not itself sandbox or
@@ -70,50 +69,100 @@ narrow concern.
 | Variable | Required | Default | Notes |
 |---|---|---|---|
 | `DISCORD_BOT_TOKEN` | conditionally | — | Required unless `DISCORD_BOT_TOKEN_FILE` is set. Never logged. |
-| `DISCORD_BOT_TOKEN_FILE` | conditionally | — | Absolute path to a protected token file or systemd credential. |
+| `DISCORD_BOT_TOKEN_FILE` | conditionally | — | Absolute path to a protected token file (e.g. a mounted secret). |
+| `COPILOT_GITHUB_TOKEN` | yes (Docker) | — | GitHub token with Copilot access, read by the Copilot CLI (fine-grained PAT with "Copilot Requests", or a `gh auth token` OAuth token). |
 | `DISCORD_GUILD_ID` | yes | — | Decimal snowflake, 17-20 digits. |
 | `DISCORD_CHANNEL_ID` | yes | — | Top-level trigger channel. Decimal snowflake. |
 | `DISCORD_USER_ID` | yes | — | The only user the broker will respond to. Decimal snowflake. |
 | `DISCORD_ROLE_ID` | yes | — | Role mention that also triggers a new session. Decimal snowflake. |
-| `BROKER_STATE_DIR` | no | `/home/sachin/.local/state/discord-copilot-broker` | Must be absolute. Created with mode `0700`. |
-| `BROKER_DEFAULT_CWD` | no | `/home/sachin` | Must be absolute. Default cwd for new Copilot sessions. |
-| `COPILOT_BIN` | no | `/home/sachin/.nvm/versions/node/v24.18.1/bin/copilot` | Must be absolute. |
+| `BROKER_STATE_DIR` | no | `/data/state` | Must be absolute. Created with mode `0700`. Backed by the `agent-broker-state` volume. |
+| `BROKER_DEFAULT_CWD` | no | `/workspace` | Must be absolute. Default cwd for new Copilot sessions. Backed by the `agent-broker-workspace` volume. |
+| `COPILOT_BIN` | no | `/usr/local/bin/copilot` | Must be absolute. Installed in the image (`COPILOT_VERSION` build arg). |
 | `BROKER_COPILOT_ALLOW_ALL` | no | `false` | When `true`, broker sessions start Copilot with `--allow-all`, disabling tool/path/URL prompts. |
 | `BROKER_MAX_SESSIONS` | no | `3` | Positive integer; caps concurrent Copilot processes. |
 | `BROKER_ATTACHMENT_MAX_BYTES` | no | `10485760` (10 MiB) | Total budget shared across all attachments in one message. |
 | `BROKER_ATTACHMENT_MAX_COUNT` | no | `5` | Max attachments per message. |
 | `BROKER_LOG_LEVEL` | no | `info` | One of `debug`, `info`, `warn`, `error`. |
 
-See `.env.example` for a template. Copy it to `.env`, fill in real values,
-and `chmod 600 .env` (the file is git-ignored). This project does not load
-`.env` files itself (no dependency for that) — export the variables in your
-shell/systemd unit, or `set -a; source .env; set +a` before running.
+## Configuration
 
-## Local run
+Create a Discord application/bot in the Discord Developer Portal, enable its
+Message Content Intent, and invite it with permissions to view channels, send
+messages, create public threads, send messages in threads, and manage threads.
+
+From the repository root:
 
 ```sh
-npm install   # no-op: zero dependencies, but validates package.json
-export DISCORD_BOT_TOKEN=...        # and the other required vars
-node src/index.js
+cp -n bots/agent-broker/.env.reference bots/agent-broker/.env
+chmod 600 bots/agent-broker/.env
+```
+
+Fill in the values above. Keep real credentials in the local `.env`, never in
+`.env.reference`.
+
+## Run with Docker
+
+Run all Compose commands from the repository root. Only one copy of the broker
+may run per Discord token.
+
+```sh
+# Build and start
+docker compose up -d --build agent-broker
+
+# Follow logs (structured JSON)
+docker compose logs -f agent-broker
+
+# Stop (the broker gets 30s to close Copilot sessions)
+docker compose stop agent-broker
+
+# Start again
+docker compose up -d agent-broker
+```
+
+The container runs `node src/index.js` as the non-root `node` user, loads
+`.env` at runtime, and automatically restarts unless manually stopped. Named
+volumes persist data across rebuilds:
+
+| Volume | Mount | Contents |
+| --- | --- | --- |
+| `agent-broker-state` | `/data/state` | Gateway resume data and thread-to-session map. |
+| `agent-broker-copilot` | `/home/node/.copilot` | Copilot CLI config and session history (needed for `session/resume`). |
+| `agent-broker-workspace` | `/workspace` | Default working directory for Copilot sessions. |
+
+The image includes `git`, `curl`, and `ripgrep` for Copilot tool use. To bump
+the Copilot CLI, change `COPILOT_VERSION` in the `Dockerfile` and rebuild.
+
+## Deploying future script updates
+
+After editing anything under `bots/agent-broker/src/`, rebuild and recreate:
+
+```sh
+docker compose up -d --build agent-broker
+```
+
+A plain `docker compose restart` does not pick up script changes because the
+source is copied into the image at build time.
+
+## Local development
+
+With the Docker copy stopped, from `bots/agent-broker`:
+
+```sh
+set -a; source .env; set +a
+export BROKER_STATE_DIR=$PWD/.local-state BROKER_DEFAULT_CWD=$PWD COPILOT_BIN=$(command -v copilot)
+npm start
 ```
 
 The process logs structured JSON to stdout and exits non-zero with a clear
 message if configuration is invalid or the state file is corrupt (state
 corruption is never silently discarded — see below).
 
-## systemd user service
+To smoke-test Copilot ACP inside the image without connecting to Discord:
 
-The managed unit `discord-copilot-broker.service` runs directly as `sachin`
-and uses systemd `LoadCredential` for the Discord token. Its source of truth
-is the chezmoi dotfiles repository. The credential file is intentionally not
-managed by chezmoi:
-
-```text
-~/.config/discord-copilot-broker/discord-bot-token
+```sh
+docker compose run --rm --no-deps \
+  -v ./bots/agent-broker/scripts:/app/scripts:ro agent-broker node scripts/smoke-acp.mjs
 ```
-
-The service remains disabled until the live Discord cutover. User lingering
-must be enabled for it to continue running after all login sessions end.
 
 ## Offline tests
 
@@ -178,7 +227,7 @@ interaction window.
 
 - One Discord thread ⇄ one Copilot ACP session/process, for the lifetime of
   that mapping.
-- **All sessions run as the same OS user against the same filesystem.**
+- **All sessions run as the same container user against the same container filesystem.**
   There is no per-thread chroot, container, or filesystem isolation. Two
   threads working in the same directory can observe and clobber each
   other's file changes. This is a deliberate, documented limitation, not an
@@ -216,22 +265,15 @@ resolving the pending request. On timeout or `/cancel`, the ACP response is
 `{outcome:{outcome:'selected',optionId:<id>}}`. The approval message is
 updated in place afterward without ever exposing the interaction token.
 
-**Unrestricted sudo/NOPASSWD is not configured by this application.** If
-the underlying `sachin` account happens to have such access configured
-elsewhere on the host, that is an operator/host-level decision entirely
-outside this project's scope — the broker only ever surfaces exactly the
-permission request the ACP agent itself sends, it does not grant, imply,
-or manage any sudo configuration.
-
-The installed systemd service sets `BROKER_COPILOT_ALLOW_ALL=true`, so
+When `BROKER_COPILOT_ALLOW_ALL=true` (the `.env.reference` default),
 broker-launched Copilot processes bypass this approval workflow entirely.
-This setting does not affect terminal Copilot sessions and does not grant
-operating-system sudo access.
+This only affects Copilot inside the container.
 
 ## Known limitations
 
-- No sandboxing of Copilot child processes: see "shared-filesystem
-  warning" above.
+- No per-thread sandboxing of Copilot child processes: see
+  "shared-filesystem warning" above. The container is the only isolation
+  boundary.
 - The Discord REST client serializes all requests through a single queue;
   this is simple and correct but not maximally throughput-optimized (fine
   for a single-guild, single-operator bot).

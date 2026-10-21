@@ -132,19 +132,19 @@ export function loadConfig(env = process.env) {
 
   const stateDir = requireAbsolutePath(
     'BROKER_STATE_DIR',
-    env.BROKER_STATE_DIR || '/home/sachin/.local/state/discord-copilot-broker',
+    env.BROKER_STATE_DIR || '/data/state',
     issues,
   );
 
   const defaultCwd = requireAbsolutePath(
     'BROKER_DEFAULT_CWD',
-    env.BROKER_DEFAULT_CWD || '/home/sachin',
+    env.BROKER_DEFAULT_CWD || '/workspace',
     issues,
   );
 
   const copilotBin = requireAbsolutePath(
     'COPILOT_BIN',
-    env.COPILOT_BIN || '/home/sachin/.nvm/versions/node/v24.18.1/bin/copilot',
+    env.COPILOT_BIN || '/usr/local/bin/copilot',
     issues,
   );
 

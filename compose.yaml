@@ -12,3 +12,25 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  agent-broker:
+    build: ./bots/agent-broker
+    env_file:
+      - ./bots/agent-broker/.env
+    volumes:
+      - agent-broker-state:/data/state
+      - agent-broker-copilot:/home/node/.copilot
+      - agent-broker-workspace:/workspace
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  agent-broker-state:
+  agent-broker-copilot:
+  agent-broker-workspace:

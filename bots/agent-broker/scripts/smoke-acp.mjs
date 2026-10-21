@@ -2,10 +2,8 @@
 import { AcpClient } from '../src/acp/client.js';
 import { createLogger } from '../src/logger.js';
 
-const copilotBin =
-  process.env.COPILOT_BIN ||
-  '/home/sachin/.nvm/versions/node/v24.18.1/bin/copilot';
-const cwd = process.env.BROKER_DEFAULT_CWD || '/home/sachin';
+const copilotBin = process.env.COPILOT_BIN || '/usr/local/bin/copilot';
+const cwd = process.env.BROKER_DEFAULT_CWD || '/workspace';
 const logger = createLogger({ logLevel: 'error' });
 
 const client = new AcpClient({ copilotBin, cwd, logger }).start();

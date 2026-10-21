@@ -9,6 +9,7 @@ The root `compose.yaml` manages their containers.
 | Bot | Directory | Description |
 | --- | --- | --- |
 | [Dictionary](bots/dictionary/README.md) | `bots/dictionary` | Dictionary lookups using the Free Dictionary API with a Gemini fallback. |
+| [Agent Broker](bots/agent-broker/README.md) | `bots/agent-broker` | Bridges Discord threads to GitHub Copilot CLI sessions over ACP, one session per thread. |
 
 ## Run with Docker
 
@@ -33,7 +34,7 @@ Keep its Docker build context inside that directory and exclude `.env` and
 `.env.*` in its `.dockerignore`.
 
 Add a service to the root `compose.yaml` using the dictionary service as a
-starting point. Set `build: ./bots/<name>`, set `env_file` to
+starting point (see the agent-broker service for persistent named volumes). Set `build: ./bots/<name>`, set `env_file` to
 `./bots/<name>/.env`, and retain the restart policy, init process, and log limits.
 Use a separate Discord application/token for each bot. Add it to the table
 above with a link to its README, create its local `.env`, and run

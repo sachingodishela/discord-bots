@@ -36,9 +36,10 @@ describe('config validation', () => {
     assert.equal(cfg.attachmentMaxBytes, 10 * 1024 * 1024);
     assert.equal(cfg.attachmentMaxCount, 5);
     assert.equal(cfg.logLevel, 'info');
-    assert.equal(cfg.defaultCwd, '/home/sachin');
+    assert.equal(cfg.defaultCwd, '/workspace');
+    assert.equal(cfg.stateDir, '/data/state');
+    assert.equal(cfg.copilotBin, '/usr/local/bin/copilot');
     assert.equal(cfg.copilotAllowAll, false);
-    assert.ok(cfg.stateDir.startsWith('/'));
   });
 
   test('rejects missing token', () => {
