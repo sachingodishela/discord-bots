@@ -41,12 +41,23 @@ docker compose stop dictionary
 # Start it again
 docker compose up -d dictionary
 
-# Rebuild after code or dependency changes
-docker compose up -d --build dictionary
 ```
 
 Stop any existing copy running directly with Node before starting the container
 to avoid duplicate bot replies.
+
+## Deploying future script updates
+
+After editing `bots/dictionary/index.js` or its dependencies, run this from the
+repository root to rebuild the image and recreate the container with your changes:
+
+```sh
+docker compose up -d --build dictionary
+```
+
+A plain `docker compose restart` does not pick up script changes because the
+source is copied into the image at build time. For another bot, replace
+`dictionary` with its Compose service name.
 
 ## Local development
 
