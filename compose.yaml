@@ -1,0 +1,14 @@
+name: discord-bots
+
+services:
+  dictionary:
+    build: ./bots/dictionary
+    env_file:
+      - ./bots/dictionary/.env
+    restart: unless-stopped
+    init: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
